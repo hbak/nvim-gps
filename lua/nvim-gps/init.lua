@@ -305,21 +305,9 @@ local update_tree = ts_utils.memoize_by_buf_tick(function(bufnr)
 end)
 
 ---@return table|nil  the data in table format, or nil if gps is not available
-function M.get_data()
-	-- Inserting text cause error nodes
-	if vim.api.nvim_get_mode().mode == 'i' then
-		return data_cache_value
-	end
-
-	-- Avoid repeated calls on same cursor position
-	local curr_loc = vim.api.nvim_win_get_cursor(0)
-	if data_prev_loc[1] == curr_loc[1] and data_prev_loc[2] == curr_loc[2] then
-		return data_cache_value
-	end
-
-	data_prev_loc = vim.api.nvim_win_get_cursor(0)
-
-	local filelang = ts_parsers.ft_to_lang(vim.bo.filetype)
+function M.get_data(bufnr, cursor_pos)
+	local buf_filetype = vim.fn.getbufvar(bufnr, '&filetype')
+	local filelang = ts_parsers.ft_to_lang(buf_filetype)
 	local gps_query = ts_queries.get_query(filelang, "nvimGPS")
 	local transform = transform_lang[filelang]
 	local config = configs[filelang]
@@ -329,9 +317,10 @@ function M.get_data()
 	end
 
 	-- Request treesitter parser to update the syntax tree for the current buffer.
-	update_tree(vim.api.nvim_get_current_buf())
+	update_tree(bufnr)
 
-	local current_node = ts_utils.get_node_at_cursor()
+	-- local current_node = ts_utils.get_node_at_cursor()
+	local current_node = utils.get_node_at_coords(bufnr, cursor_pos)
 
 	local node_data = {}
 	local node = current_node
@@ -340,7 +329,7 @@ function M.get_data()
 		local text = ""
 
 		if vim.fn.has("nvim-0.7") > 0 then
-			text = vim.treesitter.query.get_node_text(capture_node, 0)
+			text = vim.treesitter.query.get_node_text(capture_node, bufnr)
 			if text == nil then
 				return data_cache_value
 			end
@@ -364,10 +353,8 @@ function M.get_data()
 	while node do
 		local iter = gps_query:iter_captures(node, 0)
 		local capture_ID, capture_node = iter()
-
 		if capture_node == node then
 			if gps_query.captures[capture_ID] == "scope-root" then
-
 				while capture_node == node do
 					capture_ID, capture_node = iter()
 				end
@@ -404,7 +391,7 @@ function M.get_data()
 end
 
 ---@return string|nil  the pretty statusline component, or nil if not available
-function M.get_location(opts)
+function M.get_location(line, col, opts)
 	if vim.api.nvim_get_mode().mode == 'i' then
 		return location_cache_value
 	end
@@ -418,7 +405,7 @@ function M.get_location(opts)
 
 	local filelang = ts_parsers.ft_to_lang(vim.bo.filetype)
 	local config = configs[filelang]
-	local data = M.get_data()
+	local data = M.get_data(vim.api.nvim_get_current_buf(), { line, col })
 
 	if not data then
 		return nil
